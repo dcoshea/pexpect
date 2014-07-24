@@ -28,7 +28,20 @@ PEXPECT LICENSE
 
 from . import screen
 from . import FSM
+import logging
 import string
+
+class NullLogHandler(logging.Handler):
+    """The logger is configured to use this handler to suppress the
+    "No handlers could be found for logger ..." warning that the
+    logging module may generate, although in testing this was not
+    actually seen anyway."""
+
+    def emit(self, record):
+        pass
+
+logger = logging.getLogger(__name__)
+logger.addHandler(NullLogHandler())
 
 #
 # The 'Do.*' functions are helper functions for the ANSI class.
@@ -175,9 +188,8 @@ def DoLog (fsm):
 
     screen = fsm.memory[0]
     fsm.memory = [screen]
-    fout = open ('log', 'a')
-    fout.write (fsm.input_symbol + ',' + fsm.current_state + '\n')
-    fout.close()
+    logger.info('ANSI FSM unable to handle input %r in state %r' %
+                (fsm.input_symbol, fsm.current_state))
 
 class term (screen.screen):
 

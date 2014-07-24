@@ -21,6 +21,8 @@ PEXPECT LICENSE
 from pexpect import ANSI
 import unittest
 from . import PexpectTestCase
+import cStringIO
+import logging
 import sys
 
 PY3 = (sys.version_info[0] >= 3)
@@ -220,6 +222,22 @@ class ansiTestCase (PexpectTestCase.PexpectTestCase):
         assert s.get_abs(1, 1) == u'\ufffd'
         assert s.get_region(1, 1, 1, 5) == [u'\ufffd    ']
 
+    def test_logging(self):
+        # Create a root logger that logs to a string buffer.
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)
+        log_buffer = cStringIO.StringIO()
+        handler = logging.StreamHandler(log_buffer)
+        handler.setFormatter(logging.Formatter(
+                '%(name)s - %(levelname)s - %(message)s'))
+
+        logger.addHandler(handler)
+
+        # Cause a message to be logged.
+        s = ANSI.ANSI(1, 1)
+        s.write(b'\x1b[\xff')
+
+        assert log_buffer.getvalue() == "pexpect.ANSI - INFO - ANSI FSM unable to handle input u'\\xff' in state 'ELB'\n"
 
 if __name__ == '__main__':
     unittest.main()
