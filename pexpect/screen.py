@@ -50,6 +50,14 @@ PY3 = (sys.version_info[0] >= 3)
 if PY3:
     unicode = str
 
+class DecodeException(Exception):
+    '''This class is used to report failure to decode (from bytes to
+    unicode).'''
+
+class EncodeException(Exception):
+    '''This class is used to report failure to encode (from unicode to
+    bytes).'''
+
 def constrain (n, min, max):
 
     '''This returns a number, n constrained to the min and max bounds. '''
@@ -99,7 +107,7 @@ class screen:
         if self.decoder is not None:
             return self.decoder.decode(s)
         else:
-            return unicode(s)
+            raise DecodeException("Cannot decode as no codec specified")
 
     def _encode (self, s):
         '''This converts from the internal coding system (unicode) to
@@ -107,7 +115,7 @@ class screen:
         if self.encoder is not None:
             return self.encoder(s,self.encoding_errors)[0]
         else:
-            return unicode(s)
+            raise EncodeException("Cannot encode as no codec specified")
 
     def _unicode (self):
         '''This returns a printable representation of the screen as a unicode
