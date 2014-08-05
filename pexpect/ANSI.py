@@ -25,6 +25,8 @@ PEXPECT LICENSE
 #     http://vt100.net/docs/vt102-ug/contents.html
 #     http://vt100.net/docs/vt220-rm/
 #     http://www.termsys.demon.co.uk/vtansi.htm
+#     http://en.wikipedia.org/wiki/ANSI.SYS
+#     http://man7.org/linux/man-pages/man4/console_codes.4.html
 
 from . import screen
 from . import FSM
@@ -229,6 +231,8 @@ class ANSI (term):
         self.state.add_transition ('=', 'ESC', None, 'INIT') # Selects application keypad.
         self.state.add_transition ('#', 'ESC', None, 'GRAPHICS_POUND')
         self.state.add_transition_any ('GRAPHICS_POUND', None, 'INIT')
+        self.state.add_transition ('%', 'ESC', None, 'SEL_CHARACTER_SET')
+        self.state.add_transition_any ('SEL_CHARACTER_SET', None, 'INIT')
         self.state.add_transition ('[', 'ESC', None, 'ELB')
         # ELB means Escape Left Bracket. That is ^[[
         self.state.add_transition ('H', 'ELB', DoHomeOrigin, 'INIT')
@@ -241,6 +245,7 @@ class ANSI (term):
         self.state.add_transition ('r', 'ELB', DoEnableScroll, 'INIT')
         self.state.add_transition ('m', 'ELB', self.do_sgr, 'INIT')
         self.state.add_transition ('?', 'ELB', None, 'MODECRAP')
+        self.state.add_transition ('=', 'ELB', None, 'SCREEN_MODE')
         self.state.add_transition_list (string.digits, 'ELB', DoStartNumber, 'NUMBER_1')
         self.state.add_transition_list (string.digits, 'NUMBER_1', DoBuildNumber, 'NUMBER_1')
         self.state.add_transition ('D', 'NUMBER_1', DoBack, 'INIT')
@@ -254,15 +259,29 @@ class ANSI (term):
         ### number;number;number before it. I've never seen more than two,
         ### but the specs say it's allowed. crap!
         self.state.add_transition ('m', 'NUMBER_1', self.do_sgr, 'INIT')
+        # \E[5n Device status report (DSR)
+        self.state.add_transition ('n', 'NUMBER_1', self.do_dsr, 'INIT')
         ### LED control. Same implementation problem as 'm' code.
         self.state.add_transition ('q', 'NUMBER_1', self.do_decsca, 'INIT')
+        # Linux Console Private CSI Sequences (see
+        # http://man7.org/linux/man-pages/man4/console_codes.4.html)
+        self.state.add_transition (']', 'NUMBER_1', self.do_linux_private_csi, 'INIT')
 
         # \E[?47h switch to alternate screen
         # \E[?47l restores to normal screen from alternate screen.
         self.state.add_transition_list (string.digits, 'MODECRAP', DoStartNumber, 'MODECRAP_NUM')
         self.state.add_transition_list (string.digits, 'MODECRAP_NUM', DoBuildNumber, 'MODECRAP_NUM')
+        self.state.add_transition_list (';', 'MODECRAP_NUM', None, 'MODECRAP_SEMICOLON')
+        self.state.add_transition_list (string.digits, 'MODECRAP_SEMICOLON', DoStartNumber, 'MODECRAP_NUM')
         self.state.add_transition ('l', 'MODECRAP_NUM', self.do_modecrap, 'INIT')
         self.state.add_transition ('h', 'MODECRAP_NUM', self.do_modecrap, 'INIT')
+
+        # \E[=3h sets 80x25 color screen mode in ANSI.SYS
+        self.state.add_transition_list (string.digits, 'SCREEN_MODE', DoStartNumber, 'SCREEN_MODE_NUM')
+        self.state.add_transition_list (string.digits, 'SCREEN_MODE_NUM', DoBuildNumber, 'SCREEN_MODE_NUM')
+        self.state.add_transition ('l', 'SCREEN_MODE_NUM', self.do_ansi_screen_mode, 'INIT')
+        self.state.add_transition ('h', 'SCREEN_MODE_NUM', self.do_ansi_screen_mode, 'INIT')
+
 
 #RM   Reset Mode                Esc [ Ps l                   none
         self.state.add_transition (';', 'NUMBER_1', None, 'SEMICOLON')
@@ -279,6 +298,9 @@ class ANSI (term):
         self.state.add_transition ('m', 'NUMBER_2', self.do_sgr, 'INIT')
         ### LED control. Same problem as 'm' code.
         self.state.add_transition ('q', 'NUMBER_2', self.do_decsca, 'INIT')
+        # Linux Console Private CSI Sequences (see
+        # http://man7.org/linux/man-pages/man4/console_codes.4.html)
+        self.state.add_transition (']', 'NUMBER_2', self.do_linux_private_csi, 'INIT')
         self.state.add_transition (';', 'NUMBER_2', None, 'SEMICOLON_X')
 
         # Create a state for 'q' and 'm' which allows an infinite number of ignored numbers
@@ -288,6 +310,9 @@ class ANSI (term):
         self.state.add_transition_any ('NUMBER_X', DoLog, 'INIT')
         self.state.add_transition ('m', 'NUMBER_X', self.do_sgr, 'INIT')
         self.state.add_transition ('q', 'NUMBER_X', self.do_decsca, 'INIT')
+        # Linux Console Private CSI Sequences (see
+        # http://man7.org/linux/man-pages/man4/console_codes.4.html)
+        self.state.add_transition (']', 'NUMBER_X', self.do_linux_private_csi, 'INIT')
         self.state.add_transition (';', 'NUMBER_X', None, 'SEMICOLON_X')
 
     def process (self, c):
@@ -359,5 +384,28 @@ class ANSI (term):
         '''Handler for \x1b[?<number>h and \x1b[?<number>l. If anyone
         wanted to actually use these, they'd need to add more states to the
         FSM rather than just improve or override this method. '''
+        screen = fsm.memory[0]
+        fsm.memory = [screen]
+
+    def do_dsr (self, fsm):
+        '''Handler for Device status report sequence, and other
+        sequences like it with different numbers, that just discards
+        the number. '''
+        screen = fsm.memory[0]
+        fsm.memory = [screen]
+
+    def do_linux_private_csi (self, fsm):
+        '''Handler for Linux Console Private CSI sequences that just
+        discards the numbers.'''
+        screen = fsm.memory[0]
+        fsm.memory = [screen]
+
+    def do_ansi_screen_mode (self, fsm):
+        '''Handler for ANSI.SYS screen mode sequences. that just
+        discards the number.  If anyone wanted to actually use these,
+        they'd need to add more states to the FSM rather than just
+        improve or override this method.
+
+        @todo Should this discard the current screen contents?'''
         screen = fsm.memory[0]
         fsm.memory = [screen]
